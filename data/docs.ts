@@ -9,73 +9,338 @@ export const DOCS_DATA: DocSection[] = [
         id: 'system-architecture',
         title: '1.1 System Architecture',
         content: [
-          { type: 'header', value: 'High-Level Overview' },
-          { type: 'text', value: 'GenCodify Studio (formerly WebStudio) follows a modern monorepo architecture using pnpm workspaces. It strictly separates the "Builder" (editing environment) from the "Runtime" (published sites), ensuring high performance for end-users regardless of editor complexity.' },
-          { type: 'mermaid', value: `graph TD
-    subgraph "Edge / Public"
-      User[End User]
-      Edge["Cloudflare/Vercel Edge"]
+          { type: 'header', value: 'Architectural Overview' },
+          { type: 'text', value: 'GenCodify Studio is an open-source visual development platform built on a modern microservices architecture. The system follows a strict separation of concerns between the **Builder Environment** (authoring experience) and the **Runtime Environment** (published sites), enabling optimal performance and developer experience.' },
+          { type: 'header', value: 'Core Architectural Principles' },
+          { type: 'list', value: [
+            '**Separation of Concerns**: Complete isolation between builder and runtime ensures published sites are lightweight and fast',
+            '**Monorepo Organization**: pnpm workspaces enable code sharing, type safety, and unified dependency management',
+            '**Server-Side Rendering**: Remix framework provides SSR, SSG, and API routes in a unified architecture',
+            '**Type-Safe Communication**: tRPC ensures end-to-end type safety between client and server',
+            '**Dual API Strategy**: tRPC for complex business logic, PostgREST for direct CRUD operations',
+            '**Atomic State Management**: NanoStores provide predictable state with minimal bundle size',
+            '**Real-Time Collaboration**: Yjs CRDTs enable multi-user editing with conflict resolution'
+          ] },
+          { type: 'header', value: 'System Architecture Diagram' },
+          { type: 'mermaid', value: `graph TB
+    subgraph "Client Layer"
+      BuilderUI["Builder UI<br/>(Remix + React)"]
+      Canvas["Canvas Iframe<br/>(Sandboxed Runtime)"]
     end
 
-    subgraph "Builder Environment (apps/builder)"
-      Editor[Content Creator]
-      BuilderUI["Builder UI (Remix + Vite)"]
-      Canvas["Canvas Iframe"]
+    subgraph "API Gateway Layer"
+      RemixRouter["Remix Router<br/>(SSR + API Routes)"]
+      TPRCProxy["tRPC Proxy<br/>(Type-Safe RPC)"]
+      PostgREST["PostgREST<br/>(Auto-Generated REST)"]
     end
 
-    subgraph "Core Services"
-      API["tRPC API"]
-      PostgREST["PostgREST API"]
-      Collab["Collaboration Server"]
-      DB[(PostgreSQL 15)]
+    subgraph "Business Logic Layer"
+      AuthService["Auth Service<br/>(OAuth + JWT)"]
+      ProjectService["Project Service<br/>(CRUD + Validation)"]
+      BuildService["Build Service<br/>(Compilation + Deploy)"]
+      CollabService["Collaboration Service<br/>(Yjs CRDT)"]
+      AssetService["Asset Service<br/>(S3/R2 Upload)"]
     end
 
-    subgraph "Shared Logic (packages/)"
-      SDK["React SDK"]
-      CSS["CSS Engine"]
-      NanoStores["NanoStores State"]
-      DesignSystem["Design System (Radix UI)"]
+    subgraph "Data Layer"
+      PostgreSQL[(PostgreSQL 15<br/>Primary DB)]
+      Prisma["Prisma ORM<br/>(Complex Queries)"]
+      PostgRESTDB["PostgREST<br/>(Direct SQL)"]
     end
 
-    User --> Edge
-    Edge --> SDK
-    Editor --> BuilderUI
-    BuilderUI --> Canvas
-    BuilderUI --> API
+    subgraph "External Services"
+      OAuth["GitHub/Google OAuth"]
+      Storage["S3/Cloudflare R2"]
+      Publisher["Publisher Service<br/>(Deployment)"]
+      CDN["Edge CDN<br/>(Vercel/Cloudflare)"]
+    end
+
+    BuilderUI --> RemixRouter
+    BuilderUI --> TPRCProxy
     BuilderUI --> PostgREST
-    BuilderUI --> Collab
-    API --> NanoStores
-    NanoStores --> DB
-    PostgREST --> DB
-    Canvas --> SDK
-    SDK --> DesignSystem` },
+    Canvas --> RemixRouter
+
+    RemixRouter --> AuthService
+    RemixRouter --> ProjectService
+    RemixRouter --> BuildService
+    RemixRouter --> CollabService
+    RemixRouter --> AssetService
+
+    TPRCProxy --> AuthService
+    TPRCProxy --> ProjectService
+    TPRCProxy --> BuildService
+
+    PostgREST --> PostgRESTDB
+
+    AuthService --> OAuth
+    AuthService --> Prisma
+    ProjectService --> Prisma
+    BuildService --> Prisma
+    CollabService --> Prisma
+    AssetService --> Storage
+
+    Prisma --> PostgreSQL
+    PostgRESTDB --> PostgreSQL
+
+    BuildService --> Publisher
+    Publisher --> CDN` },
+          { type: 'header', value: 'Technology Stack' },
+          { type: 'text', value: 'GenCodify Studio leverages modern, production-ready technologies across all layers of the stack:' },
+          { type: 'code', language: 'text', value: `┌─────────────────────────────────────────────────────────────┐
+│                    PRESENTATION LAYER                      │
+├─────────────────────────────────────────────────────────────┤
+│ Frontend Framework: React 18.3.0 (canary build)             │
+│ Meta-Framework:     Remix 2.16.5 (SSR + Routing)            │
+│ Build Tool:         Vite 6.3.4 (Dev Server + Bundler)      │
+│ Language:           TypeScript 5.8.2 (Strict Mode)          │
+│ Styling:            UnoCSS (Wind3 Preset)                   │
+│ UI Components:      Radix UI (Headless primitives)          │
+│ Icons:              Custom SVG icon system                  │
+│ Code Editor:        CodeMirror 6                            │
+│ Rich Text:          Lexical                                 │
+├─────────────────────────────────────────────────────────────┤
+│                    STATE MANAGEMENT                         │
+├─────────────────────────────────────────────────────────────┤
+│ Client State:       NanoStores (Atomic stores)              │
+│ Server State:       Remix Loaders/Actions                   │
+│ Forms:              Remix Form + Validations                │
+│ Real-Time:          Yjs (CRDT) + WebSocket Provider         │
+├─────────────────────────────────────────────────────────────┤
+│                    API LAYER                                │
+├─────────────────────────────────────────────────────────────┤
+│ Type-Safe RPC:      tRPC (End-to-end types)                 │
+│ REST API:           PostgREST (Auto-generated from schema)  │
+│ HTTP Client:        Custom wrapper (Auth + Retry)           │
+│ Authentication:     Remix Auth (OAuth strategies)           │
+├─────────────────────────────────────────────────────────────┤
+│                    DATA LAYER                               │
+├─────────────────────────────────────────────────────────────┤
+│ Database:           PostgreSQL 15 (JSONB support)           │
+│ ORM:                Prisma (Complex operations)             │
+│ Direct Access:      PostgREST (Simple CRUD)                 │
+│ Migrations:         Prisma Migrate                          │
+├─────────────────────────────────────────────────────────────┤
+│                    INFRASTRUCTURE                            │
+├─────────────────────────────────────────────────────────────┤
+│ Runtime:            Node.js 20 (required)                   │
+│ Package Manager:    pnpm 9.14.4 (Workspaces)                │
+│ Containerization:   Docker + Docker Compose                 │
+│ Deployment:         Vercel/Netlify/SaaS/Docker               │
+│ Storage:            S3/Cloudflare R2 (Assets)                │
+│ CDN:                Vercel Edge/Cloudflare                   │
+└─────────────────────────────────────────────────────────────┘` },
           { type: 'header', value: 'Monorepo Structure' },
-          { type: 'text', value: 'The codebase is organized as a pnpm workspace to maximize code sharing between the builder and the runtime SDKs.' },
+          { type: 'text', value: 'The codebase is organized as a pnpm workspace to maximize code sharing, enable unified dependency management, and ensure type safety across package boundaries.' },
           { type: 'code', language: 'text', value: `gencodify_studio/
-├── apps/
-│   └── builder/          # Main visual editor (Remix + Vite)
-├── packages/
-│   ├── css-data/         # CSS data structures
-│   ├── css-engine/       # CSS compilation core
-│   ├── design-system/    # UI components (Radix UI)
-│   ├── html-data/        # HTML processing utilities
-│   ├── image/            # Image optimization
-│   ├── fonts/            # Font management
-│   ├── trpc-interface/   # tRPC API interfaces
-│   ├── postgrest/        # PostgREST client wrapper
-│   ├── http-client/      # HTTP utilities
-│   ├── authorization-token/  # Token-based auth
-│   ├── asset-uploader/   # S3/R2 upload handling
-│   ├── react-sdk/        # Runtime renderer for sites
-│   ├── sdk-components-react/        # Base React components
-│   ├── sdk-components-react-radix/  # Radix UI components
-│   ├── sdk-components-react-remix/  # Remix components
+├── apps/                          # Application layer
+│   └── builder/                    # Main visual builder (Remix app)
+│       ├── app/
+│       │   ├── auth/              # OAuth authentication
+│       │   ├── builder/           # Builder UI components
+│       │   ├── canvas/            # Canvas iframe logic
+│       │   ├── dashboard/         # Dashboard and projects
+│       │   ├── routes/            # Remix routes (API + Pages)
+│       │   ├── services/          # Business logic services
+│       │   └── shared/            # Shared utilities
+│       ├── public/                # Static assets
+│       └── package.json
+│
+├── packages/                      # Shared libraries
+│   │
+│   # Core Infrastructure
+│   ├── css-data/                  # CSS property definitions
+│   ├── css-engine/                # CSS compilation and runtime
+│   ├── html-data/                 # HTML element metadata
+│   ├── design-system/             # UI component library
+│   │
+│   # Authentication & API
+│   ├── authorization-token/       # JWT token management
+│   ├── trpc-interface/            # tRPC routers and types
+│   ├── postgrest/                 # PostgREST client wrapper
+│   ├── http-client/               # HTTP utilities
+│   │
+│   # Runtime & Components
+│   ├── react-sdk/                 # Site runtime renderer
+│   ├── sdk-components-react/      # Base HTML components
+│   ├── sdk-components-react-radix/  # Radix UI wrappers
+│   ├── sdk-components-react-remix/  # Remix-specific components
 │   ├── sdk-components-react-router/ # Router components
-│   ├── sdk-components-animation/    # Animation components
-│   ├── project/          # Project data structures
-│   ├── project-build/    # Build pipeline logic
-│   ├── domain/           # Domain models
-│   └── template/         # Project templates` }
+│   ├── sdk-components-animation/    # Animation (EULA required)
+│   │
+│   # Project Management
+│   ├── project/                   # Project domain models
+│   ├── project-build/             # Build pipeline
+│   ├── domain/                    # Domain validation
+│   ├── template/                  # Project templates
+│   │
+│   # Assets & Media
+│   ├── asset-uploader/            # S3/R2 upload handler
+│   ├── image/                     # Image optimization
+│   ├── fonts/                     # Font management
+│   │
+│   # Development Tools
+│   ├── icons/                     # SVG icon system
+│   ├── feature-flags/             # Feature flag system
+│   └── sdk/                       # Shared types and schemas
+│
+├── fixtures/                      # Test fixtures
+├── docker-compose.yml             # Local development stack
+├── Dockerfile                     # Production container
+├── pnpm-workspace.yaml            # Workspace configuration
+└── package.json                   # Root package configuration` },
+          { type: 'header', value: 'Request Flow Architecture' },
+          { type: 'mermaid', value: `sequenceDiagram
+    participant Client as Client Browser
+    participant CDN as Edge CDN
+    participant Remix as Remix Server
+    participant Auth as Auth Service
+    participant DB as PostgreSQL
+    participant S3 as S3/R2 Storage
+
+    Client->>CDN: HTTP Request
+    CDN->>Remix: Forward Request
+
+    alt Protected Route
+      Remix->>Auth: Validate Session
+      Auth->>DB: Query User/Token
+      DB-->>Auth: User Data
+      Auth-->>Remix: Auth Context
+    end
+
+    alt Data Loading
+      Remix->>DB: Load Data (Prisma)
+      DB-->>Remix: Query Results
+      Remix->>S3: Fetch Assets
+      S3-->>Remix: Asset URLs
+    end
+
+    Remix->>Remix: Render HTML (SSR)
+    Remix-->>CDN: HTML Response
+    CDN-->>Client: HTML + Data
+
+    Client->>Client: Hydrate React
+    Client->>Remix: tRPC WebSocket
+    Remix->>Client: Real-Time Updates` },
+          { type: 'header', value: 'Deployment Architecture' },
+          { type: 'text', value: 'GenCodify Studio supports multiple deployment strategies optimized for different use cases:' },
+          { type: 'list', value: [
+            '**SaaS Hosting**: Managed hosting with automatic SSL, CDN, and scaling',
+            '**Static Export**: Generate static files for Vercel, Netlify, or generic hosting',
+            '**Self-Hosted**: Docker deployment with full control over infrastructure',
+            '**Edge Deployment**: CDN-first architecture for global performance'
+          ] },
+          { type: 'header', value: 'Docker Deployment Architecture' },
+          { type: 'code', language: 'text', value: `┌─────────────────────────────────────────────────────────────┐
+│                   DOCKER COMPOSE STACK                       │
+├─────────────────────────────────────────────────────────────┤
+│                                                               │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │  app (gencodify-studio:latest)                      │    │
+│  │  - Builder Application (Remix + Vite)               │    │
+│  │  - Port: 3001 (external) / 3000 (internal)          │    │
+│  │  - Depends: db (healthy), rest (started)           │    │
+│  └─────────────────────────────────────────────────────┘    │
+│                          │                                    │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │  rest (postgrest/postgrest:v12.2.0)                 │    │
+│  │  - Auto-generated REST API                          │    │
+│  │  - Port: 3000 (internal)                            │    │
+│  │  - Depends: db (healthy)                            │    │
+│  └─────────────────────────────────────────────────────┘    │
+│                          │                                    │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │  db (ghcr.io/supabase/postgres:15.1.1.55)           │    │
+│  │  - PostgreSQL 15 with pgbouncer                     │    │
+│  │  - Port: 5432                                       │    │
+│  │  - Volume: postgres-data                            │    │
+│  │  - Health Check: pg_isready every 10s               │    │
+│  └─────────────────────────────────────────────────────┘    │
+│                                                               │
+│  Network: gencodify-network (bridge)                          │
+│  Volumes: postgres-data (persistent)                          │
+│                                                               │
+└─────────────────────────────────────────────────────────────┘` },
+          { type: 'header', value: 'Security Architecture' },
+          { type: 'text', value: 'Multiple layers of security protect the platform and user data:' },
+          { type: 'list', value: [
+            '**Authentication**: OAuth 2.0 (GitHub, Google) with JWT tokens',
+            '**Authorization**: Role-based access control (Owner, Admin, Editor, Viewer)',
+            '**API Security**: tRPC provides type-safe, authenticated procedures',
+            '**CSRF Protection**: Built-in Remix CSRF token validation',
+            '**XSS Prevention**: React escaping and Content Security Policy',
+            '**SQL Injection**: Prisma parameterized queries and PostgREST prepared statements',
+            '**Asset Security**: S3/R2 signed URLs and access controls',
+            '**Canvas Isolation**: Iframe sandboxing prevents untrusted code execution**'
+          ] },
+          { type: 'header', value: 'Performance Optimization' },
+          { type: 'text', value: 'The architecture is designed for optimal performance across all dimensions:' },
+          { type: 'code', language: 'text', value: `┌─────────────────────────────────────────────────────────────┐
+│                   PERFORMANCE STRATEGIES                    │
+├─────────────────────────────────────────────────────────────┤
+│                                                               │
+│  Builder Performance                                         │
+│  ├─ Code Splitting: Route-based chunks                      │
+│  ├─ Lazy Loading: Components loaded on demand               │
+│  ├─ Virtual Scrolling: Large lists efficiently rendered    │
+│  └─ Memoization: Expensive computations cached              │
+│                                                               │
+│  Runtime Performance                                         │
+│  ├─ Atomic CSS: Minimal CSS footprint                       │
+│  ├─ Tree Shaking: Unused code eliminated                    │
+│  ├─ Asset Optimization: Images compressed and formatted     │
+│  └─ CDN Distribution: Global edge caching                   │
+│                                                               │
+│  Database Performance                                        │
+│  ├─ Connection Pooling: pgbouncer for efficient connections │
+│  ├─ Query Optimization: Indexed columns and EXPLAIN analysis │
+│  ├─ Caching: Redis for frequently accessed data             │
+│  └─ JSONB Storage: Efficient nested data storage           │
+│                                                               │
+│  Network Performance                                         │
+│  ├─ HTTP/2: Multiplexed requests                           │
+│  ├─ Compression: Brotli/Gzip encoding                      │
+│  ├─ Edge Caching: Static assets cached at edge              │
+│  └─ CDN: Global distribution network                        │
+│                                                               │
+└─────────────────────────────────────────────────────────────┘` },
+          { type: 'header', value: 'Scalability Architecture' },
+          { type: 'mermaid', value: `graph LR
+    Users["Users"] --> LB["Load Balancer"]
+    LB --> App1["App Instance 1"]
+    LB --> App2["App Instance 2"]
+    LB --> AppN["App Instance N"]
+
+    App1 --> PG["PgBouncer"]
+    App2 --> PG
+    AppN --> PG
+
+    PG --> Primary[(Primary DB)]
+    PG --> Replica1[(Read Replica 1)]
+    PG --> Replica2[(Read Replica 2)]
+
+    App1 --> Redis[(Redis Cache)]
+    App2 --> Redis
+    AppN --> Redis
+
+    App1 --> S3["Shared S3/R2"]
+    App2 --> S3
+    AppN --> S3` },
+          { type: 'header', value: 'Development vs Production' },
+          { type: 'text', value: 'The architecture adapts to different environments:' },
+          { type: 'code', language: 'text', value: `┌─────────────────────────────────────────────────────────────┐
+│              DEVELOPMENT              │        PRODUCTION       │
+├──────────────────────────────────────┼─────────────────────────┤
+│ Vite Dev Server (HMR)                │ Vite Build (Optimized)   │
+│ Self-signed SSL (wstd.dev)           │ Valid SSL (Let's Encrypt)│
+│ Hot Module Replacement               │ Static Asset Bundling    │
+│ Source Maps Enabled                  │ Source Maps Disabled     │
+│ Debug Logging                        │ Structured Logging       │
+│ Local PostgreSQL (Docker)            │ Managed PostgreSQL       │
+│ Local S3 (MinIO)                     │ Cloud S3/R2              │
+│ Loose CORS Policy                    │ Strict CORS Policy       │
+│ No Bundle Size Limits                │ Bundle Size Enforcement  │
+│ Development Mode Alerts              │ Production Optimizations │
+└─────────────────────────────────────────────────────────────┘` }
         ]
       },
       {
