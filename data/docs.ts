@@ -347,20 +347,723 @@ export const DOCS_DATA: DocSection[] = [
         id: 'core-patterns',
         title: '1.2 Core Patterns',
         content: [
-          { type: 'header', value: 'State Management' },
-          { type: 'text', value: 'We utilize a "Split State" architecture. Transient UI state (modals, panels) lives in React context. Persistent Project state (the component tree) lives in NanoStores, which synchronizes with Yjs for real-time collaboration.' },
-          { type: 'mermaid', value: `flowchart LR
-    UserOp[User Operation] --> Command[Command Handler]
-    Command --> NanoStore[NanoStore Atom]
-    NanoStore --> ReactComp[React Component]
-    NanoStore --> Yjs[Yjs Document]
-    Yjs --> WS[WebSocket Provider]
-    WS <--> Server[Collab Server]
-    
-    subgraph "Optimistic UI"
-    NanoStore
-    ReactComp
-    end` }
+          { type: 'header', value: 'Architectural Patterns Overview' },
+          { type: 'text', value: 'GenCodify Studio implements a comprehensive set of architectural patterns that enable real-time collaboration, type-safe communication, and optimal performance. These patterns form the foundation of the platform\'s scalability and maintainability.' },
+          { type: 'header', value: '1. Split State Management Pattern' },
+          { type: 'text', value: 'The application employs a sophisticated "Split State" architecture that separates concerns between transient UI state and persistent project state.' },
+          { type: 'mermaid', value: `graph TB
+    subgraph "UI State Layer"
+      Modal["Modal State<br/>(React State)"]
+      Panel["Panel State<br/>(React State)"]
+      Dialog["Dialog State<br/>(React State)"]
+    end
+
+    subgraph "Project State Layer"
+      ProjectStore["$project Atom"]
+      PagesStore["$pages Atom"]
+      InstancesStore["$instances Atom"]
+      PropsStore["$props Atom"]
+      StylesStore["$styles Atom"]
+      AssetsStore["$assets Atom"]
+      BreakpointsStore["$breakpoints Atom"]
+    end
+
+    subgraph "Collaboration Layer"
+      Awareness["$awareness Atom"]
+      SyncClient["Sync Client<br/>(immerhin)"]
+      YjsDoc["Yjs Document"]
+    end
+
+    subgraph "Data Sources"
+      RemixLoader["Remix Loaders"]
+      TRPC["tRPC Procedures"]
+      PostgREST["PostgREST Queries"]
+    end
+
+    Modal --> ProjectStore
+    Panel --> ProjectStore
+    Dialog --> ProjectStore
+
+    ProjectStore --> Awareness
+    Awareness --> SyncClient
+    SyncClient --> YjsDoc
+
+    ProjectStore --> RemixLoader
+    ProjectStore --> TRPC
+    ProjectStore --> PostgREST
+
+    RemixLoader --> ProjectStore
+    TRPC --> ProjectStore
+    PostgREST --> ProjectStore` },
+          { type: 'header', value: 'State Store Architecture' },
+          { type: 'text', value: 'NanoStores atoms provide the foundation for reactive state management with minimal bundle size:' },
+          { type: 'code', language: 'typescript', value: `// Core project state stores
+export const $project = atom<Project | undefined>();
+export const $pages = atom<Pages | undefined>();
+export const $assets = atom<Assets>(new Map());
+export const $instances = atom<Instances>(new Map());
+export const $props = atom<Props>(new Map());
+export const $dataSources = atom<DataSources>(new Map());
+export const $resources = atom(new Map<Resource["id"], Resource>());
+export const $breakpoints = atom<Breakpoints>(new Map());
+export const $styleSources = atom<StyleSources>(new Map());
+export const $styleSourceSelections = atom<StyleSourceSelections>(new Map());
+export const $styles = atom<Styles>(new Map());
+
+// Computed stores for derived state
+export const $selectedPage = computed(
+  [$pages, $awareness],
+  (pages, awareness) => {
+    if (pages === undefined || awareness === undefined) return;
+    return findPageByIdOrPath(awareness.pageId, pages);
+  }
+);
+
+// Prop values with instance context resolution
+export const $propValuesByInstanceSelector = computed(
+  [$instances, $props, $selectedPage, $unscopedVariableValues],
+  (instances, props, page, unscopedVariableValues) => {
+    // Normalize props, resolve expressions, handle actions
+    return normalizeProps({ props, assetBaseUrl, assets, pages });
+  }
+);` },
+          { type: 'header', value: 'Real-Time Collaboration Pattern' },
+          { type: 'text', value: 'The collaboration system uses a sophisticated sync architecture with leader-follower pattern for conflict resolution:' },
+          { type: 'code', language: 'typescript', value: `export class SyncClient {
+  clientId = nanoid();
+  role: "leader" | "follower";
+  object: SyncObject;
+  storages: SyncStorage[];
+
+  // Leadership management
+  lead() {
+    this.role = "leader";
+    this.emitter.emit("message", {
+      clientId: this.clientId,
+      type: "state",
+      state: this.object.getState(),
+    });
+  }
+
+  follow() {
+    this.role = "follower";
+  }
+
+  // Transactional updates with revert capability
+  transact<T>(updater: (state: State) => void) {
+    const previousState = this.object.getState();
+    try {
+      updater(this.object.getState());
+      this.emitChanges();
+    } catch (error) {
+      this.object.setState(previousState);
+      throw error;
+    }
+  }
+
+  // Change tracking and synchronization
+  private emitChanges() {
+    const changes = this.object.changes;
+    this.emitter.emit("message", {
+      clientId: this.clientId,
+      type: "changes",
+      changes,
+    });
+  }
+}` },
+          { type: 'header', value: '2. Canvas/Bridge Communication Pattern' },
+          { type: 'text', value: 'The builder-canvas relationship uses a secure iframe communication pattern with token-based authentication and API proxying.' },
+          { type: 'mermaid', value: `sequenceDiagram
+    participant Builder as Builder Window
+    participant CanvasAPI as Canvas API Proxy
+    participant Iframe as Canvas Iframe
+    participant Canvas as Canvas Context
+
+    Builder->>CanvasAPI: canvasApi.methods.update(...)
+    CanvasAPI->>Iframe: postMessage({action, token})
+    Iframe->>Iframe: Validate Token
+    Iframe->>Canvas: Execute Update
+    Canvas-->>Iframe: Result
+    Iframe-->>Builder: postMessage({result, token})
+
+    Note over Builder,Canvas: Bidirectional Communication<br/>with CSRF-like Token Protection` },
+          { type: 'header', value: 'Secure PostMessage API' },
+          { type: 'code', language: 'typescript', value: `// Secure pubsub system with token authentication
+export const createPubsub = <PublishMap>() => {
+  const apiTokenKey = "__webstudio__$__api_token";
+  let token = window.self === window.top
+    ? getRandomToken()
+    : window.top?.[apiTokenKey];
+
+  // Wrap actions with authentication token
+  const wrapAction = (action: unknown) => {
+    return { action, token };
+  };
+
+  // Validate token before processing
+  const unwrapAction = (payload: unknown) => {
+    if (payload.token !== token) {
+      throw new Error("Invalid token");
+    }
+    return payload.action as Action<keyof PublishMap>;
+  };
+
+  // Bidirectional communication
+  return {
+    publish: <Type extends keyof PublishMap>(
+      type: Type,
+      data: PublishMap[Type]
+    ) => {
+      window.parent.postMessage(wrapAction({ type, data }), "*");
+    },
+    subscribe: <Type extends keyof PublishMap>(
+      type: Type,
+      handler: (data: PublishMap[Type]) => void
+    ) => {
+      window.addEventListener("message", (event) => {
+        try {
+          const action = unwrapAction(event.data);
+          if (action.type === type) {
+            handler(action.data);
+          }
+        } catch (error) {
+          // Ignore invalid messages
+        }
+      });
+    }
+  };
+};
+
+// Dynamic API proxy for canvas methods
+export const canvasApi = createRecursiveProxy((options) => {
+  const api = getIframeApi();
+  let currentMethod = api as unknown;
+
+  // Navigate the object path
+  for (const key of options.path) {
+    currentMethod = currentMethod[key];
+  }
+
+  // Call the method with arguments
+  return currentMethod.call(null, ...options.args);
+});` },
+          { type: 'header', value: '3. Authentication & Authorization Pattern' },
+          { type: 'text', value: 'Multi-strategy authentication with role-based access control (RBAC) and granular permissions.' },
+          { type: 'code', language: 'typescript', value: `// Multi-strategy authenticator
+export const authenticator = new Authenticator<SessionData>(
+  sessionStorage,
+  { throwOnError: true }
+);
+
+// GitHub OAuth Strategy
+if (env.GH_CLIENT_ID && env.GH_CLIENT_SECRET) {
+  const github = new GitHubStrategy({
+    clientID: env.GH_CLIENT_ID,
+    clientSecret: env.GH_CLIENT_SECRET,
+    callbackURL: \`\${callbackOrigin}\${authCallbackPath({ provider: "github" })}\`,
+  }, verifyCallback);
+  authenticator.use(github, "github");
+}
+
+// Google OAuth Strategy
+if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
+  const google = new GoogleStrategy({
+    clientID: env.GOOGLE_CLIENT_ID,
+    clientSecret: env.GOOGLE_CLIENT_SECRET,
+    callbackURL: \`\${callbackOrigin}\${authCallbackPath({ provider: "google" })}\`,
+  }, verifyCallback);
+  authenticator.use(google, "google");
+}
+
+// Development form strategy (local only)
+if (env.DEV_LOGIN === "true") {
+  authenticator.use(new FormStrategy({ /* ... */ }), "dev");
+}` },
+          { type: 'header', value: 'Authorization Token System' },
+          { type: 'text', value: 'Project-based authorization with granular permissions for different user roles:' },
+          { type: 'code', language: 'typescript', value: `// Default token permissions
+export const tokenDefaultPermissions = {
+  canClone: true,
+  canCopy: true,
+  canPublish: true,
+};
+
+// Apply permissions based on relation
+export const applyTokenPermissions = (
+  token: AuthorizationToken
+): AuthorizationToken => {
+  switch (token.relation) {
+    case "viewers":
+      return { ...token, canPublish: false };
+    case "builders":
+      return { ...token, canPublish: false };
+    case "administrators":
+      return { ...token, canPublish: true };
+    case "owners":
+      return { ...token, canPublish: true, canDelete: true };
+    default:
+      return token;
+  }
+};
+
+// Authorization check in procedures
+export const authorizeProject = {
+  getProjectPermit: async ({ projectId, permits }, context) => {
+    const project = await loadProjectById(projectId, context);
+    const token = await getAuthorizationToken(project, context);
+
+    for (const permit of permits) {
+      if (token.permit === permit) {
+        return { authPermit: permit, authTokenPermissions: token };
+      }
+    }
+
+    throw new AuthorizationError("Insufficient permissions");
+  }
+};` },
+          { type: 'header', value: 'Permission Hierarchy' },
+          { type: 'mermaid', value: `graph TD
+    Owner[Owner] --> Admin[Administrator]
+    Admin --> Builder[Builder]
+    Builder --> Viewer[Viewer]
+
+    Owner -->|canDelete, canPublish, canEdit| P1[Full Access]
+    Admin -->|canPublish, canEdit, canClone| P2[Admin Access]
+    Builder -->|canEdit, canClone| P3[Edit Access]
+    Viewer -->|canView, canCopy| P4[View Access]
+
+    style Owner fill:#90EE90
+    style Admin fill:#87CEEB
+    style Builder fill:#FFD700
+    style Viewer fill:#FFA07A` },
+          { type: 'header', value: '4. Data Flow Patterns' },
+          { type: 'text', value: 'Tri-layer data flow architecture using Remix loaders, tRPC procedures, and PostgREST for optimal performance and type safety.' },
+          { type: 'mermaid', value: `graph LR
+    Client[Client Browser]
+
+    subgraph "Remix Layer"
+      Loader[Server Loaders]
+      Action[Server Actions]
+    end
+
+    subgraph "API Layer"
+      TRPC[tRPC Router]
+      PostgREST[PostgREST Client]
+    end
+
+    subgraph "Data Layer"
+      Prisma[Prisma ORM]
+      DirectSQL[Direct SQL]
+      Postgres[(PostgreSQL)]
+    end
+
+    Client -->|"Initial Load"| Loader
+    Client -->|"Forms"| Action
+    Client -->|"Real-Time"| TRPC
+    Client -->|"CRUD"| PostgREST
+
+    Loader --> Prisma
+    Action --> Prisma
+    TRPC --> Prisma
+    PostgREST --> DirectSQL
+
+    Prisma --> Postgres
+    DirectSQL --> Postgres` },
+          { type: 'header', value: 'Remix Data Loading' },
+          { type: 'code', language: 'typescript', value: `// Server-side data loading with authorization
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const context = await createContext(request);
+  const { projectId } = parseBuilderUrl(request.url);
+
+  // Load project with authorization check
+  const project = await projectApi.loadById(projectId, context);
+
+  // Check project permissions
+  const authPermit = await authorizeProject.getProjectPermit({
+    projectId: project.id,
+    permits: ["own", "admin", "build", "edit"] as const,
+  }, context);
+
+  // Get token permissions
+  const authTokenPermissions = await getAuthTokenPermissions(
+    { projectId, authToken: context.authorization.authToken },
+    context
+  );
+
+  return json({
+    projectId: project.id,
+    authPermit,
+    authTokenPermissions,
+    userPlanFeatures,
+  });
+};
+
+// Client-side hydration
+export const clientLoader = async ({
+  serverLoader
+}: ClientLoaderFunctionArgs) => {
+  const serverData = await serverLoader<typeof loader>();
+  // Hydrate client state with server data
+  $project.set(serverData.project);
+  return serverData;
+};` },
+          { type: 'header', value: 'tRPC Procedures' },
+          { type: 'code', language: 'typescript', value: `// Type-safe router with middleware
+export const {
+  router,
+  procedure,
+  middleware,
+  mergeRouters,
+} = initTRPC.context<AppContext>().create();
+
+// Caching middleware
+export const createCacheMiddleware = (seconds: number) =>
+  middleware(async ({ path, ctx, next }) => {
+    ctx.trpcCache.setMaxAge(path, seconds);
+    return next({ ctx });
+  });
+
+// Protected procedure with authentication
+export const protectedProcedure = procedure.use(
+  middleware(async ({ ctx, next }) => {
+    if (!ctx.authorization?.userId) {
+      throw new AuthorizationError("Authentication required");
+    }
+    return next({ ctx });
+  })
+);
+
+// Example router with caching and auth
+export const projectRouter = router({
+  get: protectedProcedure
+    .input(z.object({ id: z.string() }))
+    .use(createCacheMiddleware(60)) // Cache for 60 seconds
+    .query(async ({ ctx, input }) => {
+      return ctx.prisma.project.findUnique({
+        where: { id: input.id },
+        include: { pages: true }
+      });
+    })
+});` },
+          { type: 'header', value: '5. Component Architecture Pattern' },
+          { type: 'text', value: 'SDK components use a flexible architecture supporting dynamic props, style sources, and variant systems.' },
+          { type: 'code', language: 'typescript', value: `// Base component pattern with tag flexibility
+export const Box = forwardRef<
+  ElementRef<typeof defaultTag>,
+  Props
+>(({ tag: legacyTag, ...props }, ref) => {
+  // Priority: prop > default > legacy
+  const tag = getTagFromProps(props) ?? legacyTag ?? defaultTag;
+  return createElement(tag, { ...props, ref });
+});
+
+// Component metadata for builder integration
+export const meta: ComponentMeta = {
+  type: "container",
+  label: "Box",
+  icon: "BoxIcon",
+  presetStyles: {
+    display: "block",
+  },
+  props: {
+    tag: {
+      type: "string",
+      options: ["div", "span", "section", "article"],
+      default: "div",
+      control: "select",
+    },
+  },
+};
+
+// Prop normalization with expressions and actions
+export const normalizeProps = ({
+  props,
+  assetBaseUrl,
+  assets,
+  pages,
+  source,
+}: NormalizePropsOptions) => {
+  const normalizedProps = new Map<Prop["id"], Prop>();
+
+  for (const prop of props) {
+    // Handle prop expressions
+    if (prop.type === "expression") {
+      const value = evaluateExpression(prop.value, {
+        variables,
+        dataSources,
+        resources,
+      });
+      normalizedProps.set(prop.id, { ...prop, value });
+    }
+    // Handle prop actions
+    else if (prop.type === "action") {
+      const value = createActionHandler(prop.value, {
+        actions,
+        params,
+      });
+      normalizedProps.set(prop.id, { ...prop, value });
+    }
+    // Handle asset references
+    else if (prop.type === "asset") {
+      const asset = assets.get(prop.value);
+      const url = asset ? \`\${assetBaseUrl}\${asset.name}\` : "";
+      normalizedProps.set(prop.id, { ...prop, value: url });
+    }
+    // Handle simple values
+    else {
+      normalizedProps.set(prop.id, prop);
+    }
+  }
+
+  return normalizedProps;
+};` },
+          { type: 'header', value: 'Style Sources System' },
+          { type: 'text', value: 'Multi-layer styling system supporting local styles, tokens, and inheritance:' },
+          { type: 'code', language: 'typescript', value: `// Style source types
+type StyleSource =
+  | { type: "token"; id: string; name: string }      // Design tokens
+  | { type: "local"; id: string; name: string }      // Local styles
+  | { type: "generated"; id: string };               // Generated styles
+
+// Style source selection connects instances to sources
+type StyleSourceSelection = {
+  instanceId: Instance["id"];
+  values: Map<StyleSource["id"], true>;             // Active sources
+};
+
+// Style declaration with breakpoint support
+type StyleDecl = {
+  breakpointId: Breakpoint["id"];
+  state: string;                                     // ":hover", ":active", etc.
+  property: CssProperty;
+  value: StyleValue;
+  styleSourceId: StyleSource["id"];
+};
+
+// Style resolution algorithm
+export const resolveStyles = (
+  instance: Instance,
+  styleSourceSelections: StyleSourceSelections[],
+  styles: StyleDecl[],
+  breakpoints: Breakpoint[]
+) => {
+  const selection = styleSourceSelections.find(
+    (s) => s.instanceId === instance.id
+  );
+
+  if (!selection) return new Map();
+
+  const resolvedStyles = new Map<CssProperty, StyleValue>();
+
+  // Iterate through style sources in priority order
+  for (const [sourceId] of selection.values) {
+    const sourceStyles = styles.filter((s) =>
+      s.styleSourceId === sourceId &&
+      s.breakpointId === getCurrentBreakpoint()
+    );
+
+    for (const style of sourceStyles) {
+      resolvedStyles.set(style.property, style.value);
+    }
+  }
+
+  return resolvedStyles;
+};` },
+          { type: 'header', value: '6. Asset Management Pattern' },
+          { type: 'text', value: 'Direct-to-cloud upload system with streaming and optimization.' },
+          { type: 'code', language: 'typescript', value: `// S3/R2 client with signature v4
+export const createS3Client = (options: S3ClientOptions): AssetClient => {
+  const signer = new SignatureV4({
+    credentials: {
+      accessKeyId: options.accessKeyId,
+      secretAccessKey: options.secretAccessKey,
+    },
+    region: options.region,
+    service: "s3",
+  });
+
+  const uploadFile: AssetClient["uploadFile"] = async (
+    name,
+    type,
+    data
+  ) => {
+    // Validate file size
+    const maxSize = options.maxUploadSize ?? 10 * 1024 * 1024;
+    if (data.size > maxSize) {
+      throw new Error("File too large");
+    }
+
+    // Generate presigned URL
+    const url = await getPresignedUrl({
+      bucket: options.bucket,
+      key: name,
+      expiresIn: 3600,
+      method: "PUT",
+    });
+
+    // Stream upload directly to S3/R2
+    const response = await fetch(url, {
+      method: "PUT",
+      body: data,
+      headers: {
+        "Content-Type": type,
+        "Content-Length": data.size.toString(),
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error("Upload failed");
+    }
+
+    return {
+      location: options.publicUrl
+        ? \`\${options.publicUrl}/\${name}\`
+        : \`\${options.endpoint}/\${options.bucket}/\${name}\`,
+      status: "uploaded",
+      name,
+      type,
+      size: data.size,
+    };
+  };
+
+  return { uploadFile };
+};` },
+          { type: 'header', value: '7. Error Handling Pattern' },
+          { type: 'text', value: 'Multi-layer error handling with graceful degradation and user-friendly messages.' },
+          { type: 'code', language: 'typescript', value: `// Comprehensive error parser
+export const parseError = (error: unknown) => {
+  // Handle standard errors
+  if (error instanceof Error) {
+    return {
+      message: error.message,
+      status: 500,
+    };
+  }
+
+  // Handle Remix route errors
+  if (isRouteErrorResponse(error)) {
+    const parsed = PageError.safeParse(error.data);
+    if (parsed.success) {
+      return {
+        message: parsed.data.message,
+        description: parsed.data.description,
+        status: error.status,
+      };
+    }
+    return {
+      message: error.data || "Route error",
+      status: error.status,
+    };
+  }
+
+  // Handle authorization errors
+  if (error instanceof AuthorizationError) {
+    return {
+      message: "You don't have permission to perform this action",
+      status: 403,
+    };
+  }
+
+  // Handle unknown errors
+  return {
+    message: JSON.stringify(error ?? "unknown error"),
+    status: 1001,
+  };
+};
+
+// tRPC error handling
+export const createErrorResponse = (error: unknown) => ({
+  success: false as const,
+  error: typeof error === "string"
+    ? error
+    : String(error?.message || "Unknown error"),
+});
+
+// Error boundary component
+export const ErrorBoundary = ({
+  error,
+  reset,
+}: {
+  error: Error;
+  reset: () => void;
+}) => {
+  const parsedError = parseError(error);
+
+  return (
+    <div className="error-container">
+      <h2>Something went wrong</h2>
+      <p>{parsedError.message}</p>
+      {parsedError.description && (
+        <p>{parsedError.description}</p>
+      )}
+      <button onClick={reset}>Try again</button>
+    </div>
+  );
+};` },
+          { type: 'header', value: '8. Routing Pattern' },
+          { type: 'text', value: 'File-based routing with nested routes, data loaders, and automatic code splitting.' },
+          { type: 'code', language: 'text', value: `Route Structure:
+├── _ui.tsx                    # Root layout with auth
+├── _ui.(builder).tsx          # Builder main route
+├── _ui.dashboard.tsx          # Dashboard route
+├── auth.github.tsx            # GitHub OAuth entry
+├── auth.github_.callback.tsx  # GitHub OAuth callback
+├── rest.assets.tsx            # REST API: /rest/assets/*
+├── rest.build.$buildId.tsx    # REST API: /rest/build/:buildId
+└── canvas.tsx                 # Canvas iframe route` },
+          { type: 'header', value: 'Route Configuration Example' },
+          { type: 'code', language: 'typescript', value: `// Builder route with data loading
+export const loader = async ({ request }: LoaderFunctionArgs) => {
+  const [csrfToken, setCookieValue] = await getCsrfTokenAndCookie(request);
+  return json({ csrfToken }, { headers });
+};
+
+export const clientLoader = async ({
+  serverLoader
+}: ClientLoaderFunctionArgs) => {
+  const serverData = await serverLoader<typeof loader>();
+  updateCsrfToken(serverData.csrfToken);
+  return serverData;
+};
+
+export default function Builder() {
+  const { csrfToken } = useLoaderData<typeof loader>();
+  return (
+    <Outlet />
+  );
+}
+
+// REST API route for assets
+export const loader = async ({ params, request }: LoaderFunctionArgs) => {
+  const context = await createContext(request);
+  const { projectId } = parseBuilderUrl(request.url);
+
+  const assets = await loadAssetsByProject(projectId, context);
+  return json(assets);
+}
+
+// Named export for action handling
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const context = await createContext(request);
+  const formData = await request.formData();
+
+  const asset = await uploadAsset(formData, context);
+  return json(asset);
+};` },
+          { type: 'header', value: 'Pattern Summary' },
+          { type: 'text', value: 'These architectural patterns provide a robust foundation for building scalable, collaborative applications:' },
+          { type: 'list', value: [
+            '**Split State**: Clear separation between UI and project state enables optimal performance',
+            '**NanoStores**: Minimal bundle size with reactive state management',
+            '**Sync Client**: Real-time collaboration with conflict resolution',
+            '**Canvas Bridge**: Secure iframe communication with token authentication',
+            '**Multi-Strategy Auth**: Flexible authentication with role-based authorization',
+            '**Tri-Layer Data Flow**: Remix loaders, tRPC, and PostgREST for optimal data fetching',
+            '**Component System**: Flexible SDK with dynamic props and style sources',
+            '**Asset Streaming**: Direct-to-cloud uploads with optimization',
+            '**Error Boundaries**: Comprehensive error handling at all layers',
+            '**File-Based Routing**: Simple routing with automatic code splitting'
+          ] }
         ]
       },
       {
