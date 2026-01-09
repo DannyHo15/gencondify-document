@@ -1750,22 +1750,423 @@ export const generateBuild = async (projectId: string) => {
         id: 'builder-app',
         title: '3.1 Builder Application',
         content: [
-          { type: 'header', value: 'apps/builder' },
-          { type: 'text', value: 'The builder application orchestrates the entire editing experience. Built with Remix 2.16.5 and Vite 6.3.4, it manages the two-pane layout (Editor vs Canvas).' },
-          { type: 'header', value: 'Canvas Bridge' },
-          { type: 'text', value: 'The critical piece is the communication bridge between the editor UI and the user\'s site running in an iframe.' },
-          { type: 'code', language: 'typescript', value: `// apps/builder/app/canvas/use-canvas-bridge.ts
-useEffect(() => {
-  const handleMessage = (event) => {
-    if (event.data.type === 'COMPONENT_SELECTED') {
-      setSelectedInstance(event.data.instanceId);
+          { type: 'header', value: 'Builder Application Overview' },
+          { type: 'text', value: 'The Builder Application (`apps/builder/`) is the heart of GenCodify Studio, orchestrating the entire visual editing experience. Built with **Remix 2.16.5** and **Vite 6.3.4**, it manages the sophisticated two-pane layout consisting of the **Editor UI** (left panel) and **Canvas** (right iframe) where users\' sites are rendered and edited in real-time.' },
+          { type: 'header', value: 'Architecture Overview' },
+          { type: 'mermaid', value: `graph TB
+    subgraph "Builder Application"
+        BuilderUI["Builder UI (Remix)"]
+        CanvasIFrame["Canvas Iframe"]
+    end
+
+    subgraph "Builder UI Features"
+        TopBar["Top Bar"]
+        Navigator["Navigator Tree"]
+        StylePanel["Style Panel"]
+        SettingsPanel["Settings Panel"]
+        PagesPanel["Pages Panel"]
+        AssetsPanel["Assets Panel"]
+        Workspace["Workspace"]
+    end
+
+    subgraph "Canvas Features"
+        DesignMode["Design Mode"]
+        ContentMode["Content Mode"]
+        PreviewMode["Preview Mode"]
+        ComponentRenderer["Component Renderer"]
+        Styles["Global Styles"]
+    end
+
+    subgraph "Communication Bridge"
+        PubSub["PubSub System"]
+        CanvasAPI["Canvas API Proxy"]
+        BuilderAPI["Builder API Proxy"]
+    end
+
+    BuilderUI --> PubSub
+    CanvasIFrame --> PubSub
+    PubSub --> CanvasAPI
+    PubSub --> BuilderAPI
+
+    BuilderUI --> TopBar
+    BuilderUI --> Navigator
+    BuilderUI --> StylePanel
+    BuilderUI --> SettingsPanel
+    BuilderUI --> PagesPanel
+    BuilderUI --> AssetsPanel
+    BuilderUI --> Workspace
+
+    CanvasIFrame --> DesignMode
+    CanvasIFrame --> ContentMode
+    CanvasIFrame --> PreviewMode
+    CanvasIFrame --> ComponentRenderer
+    CanvasIFrame --> Styles` },
+          { type: 'header', value: 'Application Structure' },
+          { type: 'text', value: 'The builder application is organized into distinct directories, each handling specific aspects of the editing experience:' },
+          { type: 'code', language: 'text', value: `apps/builder/app/
+├── auth/                    # Authentication (OAuth strategies)
+├── builder/                 # Builder UI components
+│   ├── builder.tsx         # Main builder orchestrator
+│   └── features/           # Builder feature modules
+│       ├── address-bar/    # URL navigation display
+│       ├── assets/         # Asset management UI
+│       ├── breakpoints/    # Breakpoint editing
+│       ├── command-panel/  # Command palette (Cmd+K)
+│       ├── components/     # Component library browser
+│       ├── footer/         # Footer actions
+│       ├── help/           # Help dialog
+│       ├── keyboard-shortcuts-dialog/  # Keyboard shortcuts
+│       ├── marketplace/    # Template marketplace
+│       ├── navigator/      # Component tree navigator
+│       ├── pages/          # Page management
+│       ├── settings-panel/ # Instance settings
+│       ├── style-panel/    # Style editing interface
+│       ├── topbar/         # Top toolbar
+│       └── workspace/      # Main workspace area
+├── canvas/                 # Canvas iframe logic
+│   ├── canvas.tsx         # Main canvas component
+│   ├── features/          # Canvas-specific features
+│   └── shared/            # Shared canvas utilities
+├── dashboard/              # Project dashboard
+├── env/                    # Environment configuration
+├── routes/                 # Remix routes (API + Pages)
+├── services/               # Business logic services
+└── shared/                 # Shared utilities
+    ├── breakpoints/        # Breakpoint utilities
+    ├── copy-paste/         # Copy/paste functionality
+    ├── db/                 # Database utilities
+    ├── marketplace/        # Marketplace integration
+    ├── nano-states/        # Global state stores
+    ├── pages/              # Page utilities
+    ├── project-settings/   # Project configuration
+    ├── pubsub/             # Cross-frame messaging
+    ├── sync/               # Real-time sync
+    ├── tailwind/           # Tailwind integration
+    └── trpc/               # tRPC client` },
+          { type: 'header', value: 'Builder Features System' },
+          { type: 'text', value: 'The builder UI is composed of 18+ feature modules, each responsible for a specific aspect of the editing experience. These features are organized under `apps/builder/app/builder/features/`:' },
+          { type: 'list', value: [
+            '**Address Bar**: Displays current page URL and navigation state',
+            '**Assets**: Asset browser with drag-and-drop upload functionality',
+            '**Breakpoints**: Responsive breakpoint editor with cascade indicators',
+            '**Command Panel**: Command palette (Cmd+K) for quick actions',
+            '**Components**: Component library browser with search and filtering',
+            '**Blocking Alerts**: Modal alerts for critical errors and warnings',
+            '**Footer**: Footer with project status and publish actions',
+            '**Help**: Help dialog with documentation and keyboard shortcuts',
+            '**Keyboard Shortcuts**: Keyboard shortcuts reference dialog',
+            '**Marketplace**: Template marketplace integration',
+            '**Navigator**: Hierarchical component tree with drag-and-drop',
+            '**Pages**: Page management with routing configuration',
+            '**Settings Panel**: Instance-level settings (name, conditions, etc)',
+            '**Style Panel**: Comprehensive style editing interface',
+            '**Topbar**: Top toolbar with navigation and actions',
+            '**Workspace**: Main workspace area managing panel layout'
+          ] },
+          { type: 'header', value: 'Canvas Architecture' },
+          { type: 'text', value: 'The Canvas is where the magic happens - it renders the user\'s site in an iframe with real-time editing capabilities. The canvas supports three distinct modes:' },
+          { type: 'code', language: 'typescript', value: `// Canvas modes
+type CanvasMode =
+  | "design"   // Full visual editing with drag-and-drop
+  | "content"  // Text-only editing mode
+  | "preview"; // Read-only preview mode
+
+// Canvas component structure
+export const Canvas = () => {
+  useCanvasStore();
+  const isDesignMode = useStore($isDesignMode);
+  const isContentMode = useStore($isContentMode);
+
+  // Register component libraries
+  useMount(() => {
+    registerComponentLibrary({
+      components: baseComponents,
+      metas: baseComponentMetas,
+      hooks: baseComponentHooks,
+      templates: baseComponentTemplates,
+    });
+    // Register Radix UI components
+    // Register Animation components
+  });
+
+  // Initialize canvas API for cross-frame communication
+  useMount(initCanvasApi);
+
+  // Mount global styles
+  useLayoutEffect(() => {
+    mountStyles();
+  }, []);
+
+  return (
+    <>
+      <GlobalStyles />
+      <ErrorBoundary FallbackComponent={FallbackComponent}>
+        {elements}
+      </ErrorBoundary>
+      {isDesignMode && <DesignMode />}
+      {isContentMode && <ContentEditMode />}
+    </>
+  );
+};` },
+          { type: 'header', value: 'Canvas Bridge Communication' },
+          { type: 'text', value: 'The Canvas Bridge is the critical communication layer between the Builder UI and the Canvas iframe. It uses a sophisticated postMessage-based system with token-based authentication to prevent message interception.' },
+          { type: 'code', language: 'typescript', value: `// PubSub system for secure cross-frame messaging
+export const createPubsub = <PublishMap>() => {
+  // Generate CSRF-like token for message validation
+  const apiTokenKey = "__webstudio__$__api_token";
+  let token = window.self === window.top
+    ? getRandomToken()
+    : window.top?.[apiTokenKey];
+
+  // Wrap actions with authentication token
+  const wrapAction = (action: unknown) => {
+    return { action, token };
+  };
+
+  // Validate token before processing
+  const unwrapAction = (payload: unknown) => {
+    if (payload.token !== token) {
+      throw new Error("Invalid token");
+    }
+    return payload.action;
+  };
+
+  return {
+    // Publish from canvas to builder
+    publish<Type extends keyof PublishMap>(action: Action<Type>) {
+      parentPostMessageInternal(wrapAction(action), "*");
+    },
+
+    // Subscribe to messages
+    useSubscribe<Type extends keyof PublishMap>(
+      type: Type,
+      onAction: (payload: PublishMap[Type]) => void
+    ) {
+      useEffect(() => {
+        return emitter.on(type, handleOnAction);
+      }, [type, handleOnAction]);
     }
   };
-  window.addEventListener('message', handleMessage);
-  return () => window.removeEventListener('message', handleMessage);
-}, []);` },
+};` },
+          { type: 'header', value: 'Canvas API Proxy' },
+          { type: 'text', value: 'The Canvas API Proxy provides a type-safe way for the Builder to invoke methods in the Canvas context using a recursive proxy pattern:' },
+          { type: 'code', language: 'typescript', value: `// Canvas API proxy for cross-frame method calls
+export const canvasApi = createRecursiveProxy((options) => {
+  const api = getIframeApi();
+
+  if (api == null) {
+    console.warn("Canvas iframe not loaded yet");
+    return null;
+  }
+
+  // Navigate the object path
+  let currentMethod = api as unknown;
+  for (const key of options.path) {
+    currentMethod = currentMethod[key];
+  }
+
+  // Call the method with arguments
+  return currentMethod.call(null, ...options.args);
+}) as typeof _canvasApi;
+
+// Available Canvas APIs
+const _canvasApi = {
+  isInitialized: () => true,
+  setInert,           // Disable pointer events
+  resetInert,         // Enable pointer events
+  preventUnhandled,   // Prevent drag-and-drop issues
+  monitorForExternal, // Handle external file drops
+  detectSupportedFontWeights,
+};` },
+          { type: 'header', value: 'Builder API Proxy' },
+          { type: 'text', value: 'The Builder API Proxy allows the Canvas to invoke Builder methods, primarily for toast notifications and image uploads:' },
+          { type: 'code', language: 'typescript', value: `// Builder API for canvas-to-builder communication
+const _builderApi = {
+  isInitialized: () => true,
+  toast: {
+    info: toast.info,
+    warn: toast.warn,
+    error: toast.error,
+    success: toast.success,
+  },
+  uploadImages: async (srcs: string[]) => {
+    const urlToIds = await uploadAssets(
+      "image",
+      srcs.map((src) => new URL(src))
+    );
+    return new Map([...urlToIds.entries()].map(([url, id]) => [url.href, id]));
+  },
+  showTokenConflictDialog,
+};
+
+export const builderApi = createRecursiveProxy((options) => {
+  const api = getTopApi();
+  // Navigate and invoke method
+  return currentMethod.call(null, ...options.args);
+}) as typeof _builderApi;` },
+          { type: 'header', value: 'State Management' },
+          { type: 'text', value: 'The builder uses NanoStores for reactive state management with atoms and computed stores:' },
+          { type: 'code', language: 'typescript', value: `// Core state stores
+export const $project = atom<Project | undefined>();
+export const $pages = atom<Pages | undefined>();
+export const $assets = atom<Assets>(new Map());
+export const $instances = atom<Instances>(new Map());
+export const $props = atom<Props>(new Map());
+export const $breakpoints = atom<Breakpoints>(new Map());
+export const $styles = atom<Styles>(new Map());
+export const $styleSources = atom<StyleSources>(new Map());
+export const $styleSourceSelections = atom<StyleSourceSelections>(new Map());
+
+// Mode stores
+export const $isPreviewMode = atom<boolean>(false);
+export const $isDesignMode = atom<boolean>(true);
+export const $isContentMode = atom<boolean>(false);
+
+// Computed stores
+export const $selectedPage = computed(
+  [$pages, $awareness],
+  (pages, awareness) => {
+    if (pages === undefined || awareness === undefined) return;
+    return findPageByIdOrPath(awareness.pageId, pages);
+  }
+);
+
+// React hooks for stores
+const page = useStore($selectedPage);
+const isDesignMode = useStore($isDesignMode);` },
+          { type: 'header', value: 'Design Mode Features' },
+          { type: 'text', value: 'Design Mode enables full visual editing capabilities including drag-and-drop, component selection, style editing, and real-time preview:' },
+          { type: 'list', value: [
+            '**Drag and Drop**: Pragmatic Drag and Drop library for component reordering',
+            '**Instance Selection**: Click-to-select with visual indicators',
+            '**Instance Hovering**: Hover effects with component outlines',
+            '**Style Editing**: Real-time style updates with atomic CSS generation',
+            '**Copy/Paste**: Clipboard integration for components',
+            '**Keyboard Shortcuts**: Comprehensive keyboard command support',
+            '**Collaborative Editing**: Multi-user cursor presence and selection',
+            '**Context Menus**: Right-click context menus for quick actions'
+          ] },
+          { type: 'header', value: 'Content Mode Features' },
+          { type: 'text', value: 'Content Mode simplifies the interface for content editors, focusing only on text editing:' },
+          { type: 'list', value: [
+            '**Text Editing Only**: Direct text manipulation without layout changes',
+            '**Rich Text Support**: Lexical-based rich text editor',
+            '**Inline Editing**: Edit text directly on the canvas',
+            '**Simplified UI**: Minimal interface for non-technical users'
+          ] },
+          { type: 'header', value: 'Component Registration' },
+          { type: 'text', value: 'The builder registers multiple component libraries that are available for use in projects:' },
+          { type: 'code', language: 'typescript', value: `// Component library registration
+registerComponentLibrary({
+  components: baseComponents,      // HTML primitives
+  metas: baseComponentMetas,      // Component metadata
+  hooks: baseComponentHooks,      // Component lifecycle hooks
+  templates: baseComponentTemplates, // Component templates
+});
+
+// Radix UI components
+registerComponentLibrary({
+  namespace: "@webstudio-is/sdk-components-react-radix",
+  components: radixComponents,
+  metas: radixComponentMetas,
+  hooks: radixComponentHooks,
+  templates: radixTemplates,
+});
+
+// Animation components (proprietary)
+registerComponentLibrary({
+  namespace: "@webstudio-is/sdk-components-animation",
+  components: animationComponents,
+  metas: animationComponentMetas,
+  hooks: animationComponentHooks,
+  templates: animationTemplates,
+});` },
           { type: 'header', value: 'Code Editor Integration' },
-          { type: 'text', value: 'The builder uses CodeMirror 6 for code editing and Lexical for rich text editing, providing a professional editing experience.' }
+          { type: 'text', value: 'The builder integrates CodeMirror 6 for professional code editing experiences:' },
+          { type: 'list', value: [
+            '**CSS Editor**: Syntax highlighting for CSS with autocomplete',
+            '**JavaScript Editor**: Code editing for expressions and actions',
+            '**HTML Editor**: HTML source code viewing and editing',
+            '**Rich Text Editor**: Lexical-based rich text editing',
+            '**Code Highlighting**: Syntax highlighting for 10+ languages'
+          ] },
+          { type: 'header', value: 'Route Structure' },
+          { type: 'text', value: 'The builder uses Remix file-based routing with nested routes:' },
+          { type: 'code', language: 'text', value: `apps/builder/app/routes/
+├── _ui.tsx                    # Root layout with auth
+├── _ui.(builder).tsx          # Builder main route
+├── _ui.dashboard.tsx          # Dashboard route
+├── auth.github.tsx            # GitHub OAuth entry
+├── auth.github_.callback.tsx  # GitHub OAuth callback
+├── auth.google.tsx            # Google OAuth entry
+├── auth.google_.callback.tsx  # Google OAuth callback
+├── rest.assets.tsx            # REST API: /rest/assets/*
+├── rest.build.$buildId.tsx    # REST API: /rest/build/:buildId
+└── canvas.tsx                 # Canvas iframe route` },
+          { type: 'header', value: 'Authentication Integration' },
+          { type: 'text', value: 'Multi-strategy authentication with OAuth providers:' },
+          { type: 'list', value: [
+            '**GitHub OAuth**: Full GitHub integration',
+            '**Google OAuth**: Google account authentication',
+            '**Generic OAuth2**: Custom OAuth2 provider support',
+            '**Form Login**: Development-only form-based authentication'
+          ] },
+          { type: 'header', value: 'Real-time Collaboration' },
+          { type: 'text', value: 'Built-in support for multi-user editing with presence awareness:' },
+          { type: 'list', value: [
+            '**Presence Awareness**: See other users\' cursors and selections',
+            '**Conflict Resolution**: Automatic merge of concurrent changes',
+            '**Sync Client**: Yjs-based CRDT for conflict-free replication',
+            '**Awareness Store**: Shared state for user presence'
+          ] },
+          { type: 'header', value: 'Performance Optimizations' },
+          { type: 'text', value: 'The builder implements multiple performance optimizations:' },
+          { type: 'list', value: [
+            '**Code Splitting**: Route-based chunks for optimal loading',
+            '**Lazy Loading**: Components loaded on demand',
+            '**Virtual Scrolling**: Efficient rendering of large lists',
+            '**Memoization**: Expensive computations cached',
+            '**Batch Updates**: RAF-based update batching',
+            '**Debouncing**: Debounced window resize and other events'
+          ] },
+          { type: 'header', value: 'Error Handling' },
+          { type: 'text', value: 'Comprehensive error handling with graceful degradation:' },
+          { type: 'code', language: 'typescript', value: `const FallbackComponent = ({ error, resetErrorBoundary }: FallbackProps) => {
+  useEffect(() => {
+    // Auto-retry when webstudio data changes
+    return serverSyncStore.subscribe(resetErrorBoundary);
+  }, [resetErrorBoundary]);
+
+  return (
+    <body>
+      <ErrorMessage
+        error={{
+          message: error instanceof Error ? error.message : "Unknown error",
+          status: 500,
+        }}
+      />
+    </body>
+  );
+};
+
+const handleError = (error: unknown) => {
+  if (error instanceof Error) {
+    builderApi.toast.error(error.message);
+    return;
+  }
+  builderApi.toast.error(\`Unknown error: \${String(error)}\`);
+  console.error(error);
+};` },
+          { type: 'header', value: 'Development Experience' },
+          { type: 'text', value: 'The builder provides an excellent development experience:' },
+          { type: 'list', value: [
+            '**Hot Module Replacement**: Instant updates during development',
+            '**TypeScript Support**: Full type safety across the codebase',
+            '**ESLint**: Zero-warnings policy enforced',
+            '**Storybook**: Component documentation and testing',
+            '**Unit Tests**: Vitest for unit testing',
+            '**E2E Tests**: Playwright for end-to-end testing'
+          ] }
         ]
       },
       {
